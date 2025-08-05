@@ -1,13 +1,25 @@
-# Model Context Protocol (MCP) Server + Access OAuth
+# Web Crawler MCP Server
 
-This is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/introduction) server that supports remote MCP connections, with Access OAuth built-in.
+A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/introduction) server that provides intelligent web crawling capabilities. Built on Cloudflare Workers with browser rendering and AI-powered link extraction, this server enables clients to crawl web pages and extract relevant links based on natural language queries.
 
-You can deploy it to your own Cloudflare account, and after you create your own Access for SaaS OIDC app, you'll have a fully functional remote MCP server that you can build off. Users will be able to connect to your MCP server by signing in with your connected Access Identity Provider.
+## Features
 
-The MCP server (powered by [Cloudflare Workers](https://developers.cloudflare.com/workers/)):
+- **Intelligent Web Crawling**: Uses Cloudflare's headless browser to render JavaScript-heavy pages
+- **AI-Powered Link Analysis**: Leverages Workers AI to analyze and rank links based on relevance to your query
+- **OAuth Authentication**: Secure access control via GitHub OAuth through Cloudflare Access
+- **Remote MCP Support**: Connect from MCP clients like Claude Desktop, Inspector, or Cursor
 
-- Acts as OAuth _Server_ to your MCP clients
-- Acts as OAuth _Client_ to your _real_ OAuth server (in this case, Access)
+## Core Functionality
+
+The server provides a `webCrawl` tool that takes:
+- **URL**: The webpage to crawl
+- **Query**: Natural language description of what links you're looking for
+
+Example queries:
+- "Get all the blog post links from this website"
+- "Find all product pages in the electronics category"
+- "Get links to all API reference documentation"
+- "Find all GitHub repository links on this page"
 
 ## Getting Started
 
@@ -15,39 +27,39 @@ Clone the repo & install dependencies: `npm install`
 
 ### For Production
 
-Create a new [Access for SaaS OIDC App](https://developers.cloudflare.com/cloudflare-one/applications/configure-apps/saas-apps/generic-oidc-saas/):
+Create a new GitHub OAuth App in your GitHub account:
+- Go to Settings → Developer settings → OAuth Apps → New OAuth App
+- Set Authorization callback URL to: `https://web-crawler-mcp.<your-subdomain>.workers.dev/callback`
+- Note your Client ID and generate a Client Secret
 
-- For the Authorization callback URL, specify `https://mcp-access-oauth.<your-subdomain>.workers.dev/callback` and `http://localhost:8788/callback` if you are developing locally.
-- Note your Client ID and Client secret.
-- Set secrets via Wrangler
+Set secrets via Wrangler:
 
 ```bash
-wrangler secret put ACCESS_CLIENT_ID
-wrangler secret put ACCESS_CLIENT_SECRET
-wrangler secret put ACCESS_TOKEN_URL
-wrangler secret put ACCESS_AUTHORIZATION_URL
-wrangler secret put ACCESS_JWKS_URL
-wrangler secret put COOKIE_ENCRYPTION_KEY # add any random string here e.g. openssl rand -hex 32
+wrangler secret put GITHUB_CLIENT_ID
+wrangler secret put GITHUB_CLIENT_SECRET
+wrangler secret put COOKIE_ENCRYPTION_KEY # Generate with: openssl rand -hex 32
 ```
 
 #### Set up a KV namespace
 
 - Create the KV namespace:
   `wrangler kv:namespace create "OAUTH_KV"`
-- Update the Wrangler file with the KV ID
+- Update the KV namespace ID in `wrangler.jsonc`
 
 #### Deploy & Test
 
-Deploy the MCP server to make it available on your workers.dev domain
-` wrangler deploy`
+Deploy the MCP server:
+```bash
+wrangler deploy
+```
 
 Test the remote server using [Inspector](https://modelcontextprotocol.io/docs/tools/inspector):
 
-```
+```bash
 npx @modelcontextprotocol/inspector@latest
 ```
 
-Enter `https://mcp-access-oauth.<your-subdomain>.workers.dev/sse` and hit connect. Once you go through the authentication flow, you'll see the Tools working:
+Enter `https://web-crawler-mcp.<your-subdomain>.workers.dev/sse` and connect. After GitHub authentication, you'll see the `webCrawl` tool available:
 
 <img width="640" alt="image" src="https://github.com/user-attachments/assets/7973f392-0a9d-4712-b679-6dd23f824287" />
 
@@ -55,13 +67,16 @@ You now have a remote MCP server deployed!
 
 ### Access Control
 
-This MCP server uses Access for authentication. All authenticated Access users can access basic tools like "add".
+This MCP server uses GitHub OAuth for authentication. All authenticated users can access the `userInfoOctokit` tool to get their GitHub profile information.
 
-The "generateImage" tool is restricted to specific Access users listed in the `ALLOWED_USERNAMES` configuration:
+The `webCrawl` tool is restricted to specific GitHub users listed in the `ALLOWED_USERNAMES` configuration:
 
 ```typescript
-// Add user emails for image generation access
-const ALLOWED_EMAILS = new Set(['employee1@mycompany.com', 'teammate1@mycompany.com'])
+// Add GitHub usernames who should have access to web crawling
+const ALLOWED_USERNAMES = new Set<string>([
+  'dhannusch',
+  // Add more GitHub usernames here
+])
 ```
 
 ### Access the remote MCP server from Claude Desktop
@@ -70,38 +85,33 @@ Open Claude Desktop and navigate to Settings -> Developer -> Edit Config. This o
 
 Replace the content with the following configuration. Once you restart Claude Desktop, a browser window will open showing your OAuth login page. Complete the authentication flow to grant Claude access to your MCP server. After you grant access, the tools will become available for you to use.
 
-```
+```json
 {
   "mcpServers": {
-    "math": {
+    "web-crawler": {
       "command": "npx",
       "args": [
         "mcp-remote",
-        "https://mcp-access-oauth.<your-subdomain>.workers.dev/sse"
+        "https://web-crawler-mcp.<your-subdomain>.workers.dev/sse"
       ]
     }
   }
 }
 ```
 
-Once the Tools (under 🔨) show up in the interface, you can ask Claude to use them. For example: "Could you use the math tool to add 23 and 19?". Claude should invoke the tool and show the result generated by the MCP server.
+Once the Tools (under 🔨) show up in the interface, you can ask Claude to use them. For example: "Could you crawl https://news.ycombinator.com and find all links related to AI or machine learning?"
 
 ### For Local Development
 
-If you'd like to iterate and test your MCP server, you can do so in local development.
+For local development and testing:
 
-- For the Homepage URL, specify `http://localhost:8788`
-- For the Authorization callback URL, specify `http://localhost:8788/callback`
-- Note your Client ID and generate a Client secret.
+- Update your GitHub OAuth App callback URL to include: `http://localhost:8788/callback`
 - Create a `.dev.vars` file in your project root with:
 
 ```
-ACCESS_CLIENT_ID=<your client id>
-ACCESS_CLIENT_SECRET=<your client secret>
-ACCESS_TOKEN_URL=<your Access for SaaS token url>
-ACCESS_AUTHORIZATION_URL=<your Access for SaaS authorization url>
-ACCESS_JWKS_URL=<your Access for SaaS JWKS url>
-COOKIE_ENCRYPTION_KEY=COOKIE_ENCRYPTION_KEY
+GITHUB_CLIENT_ID=<your github oauth client id>
+GITHUB_CLIENT_SECRET=<your github oauth client secret>
+COOKIE_ENCRYPTION_KEY=<random 32-byte hex string>
 ```
 
 #### Develop & Test
@@ -125,28 +135,36 @@ You can connect your MCP server to other MCP clients like Windsurf by opening th
 
 ## How does it work?
 
-#### OAuth Provider
+### Architecture Overview
 
-The OAuth Provider library serves as a complete OAuth 2.1 server implementation for Cloudflare Workers. It handles the complexities of the OAuth flow, including token issuance, validation, and management. In this project, it plays the dual role of:
+This web crawler MCP server combines several technologies to provide intelligent web crawling:
 
-- Authenticating MCP clients that connect to your server
-- Managing the connection to Access's OAuth services
-- Securely storing tokens and authentication state in KV storage
+#### Browser Rendering
+- Uses Cloudflare's headless browser API to render JavaScript-heavy websites
+- Ensures all dynamic content is loaded before analysis
+- Handles modern web applications that rely on client-side rendering
 
-#### Durable MCP
+#### AI-Powered Analysis
+- Leverages Cloudflare Workers AI to analyze extracted page content
+- Interprets natural language queries to understand what links users are looking for
+- Ranks and filters links based on relevance scores
+- Provides reasoning for why each link is considered relevant
 
-Durable MCP extends the base MCP functionality with Cloudflare's Durable Objects, providing:
+#### OAuth Authentication
+- Integrates with GitHub OAuth for secure user authentication
+- Uses Cloudflare's OAuth provider for token management
+- Supports role-based access control for different tools
 
-- Persistent state management for your MCP server
-- Secure storage of authentication context between requests
-- Access to authenticated user information via `this.props`
-- Support for conditional tool availability based on user identity
+#### MCP Protocol
+- Implements the Model Context Protocol for seamless integration with AI assistants
+- Provides Server-Sent Events (SSE) endpoint for real-time communication
+- Supports tool discovery and invocation from various MCP clients
 
-#### MCP Remote
+### Web Crawling Workflow
 
-The MCP Remote library enables your server to expose tools that can be invoked by MCP clients like the Inspector. It:
-
-- Defines the protocol for communication between clients and your server
-- Provides a structured way to define tools
-- Handles serialization and deserialization of requests and responses
-- Maintains the Server-Sent Events (SSE) connection between clients and your server
+1. **Authentication**: User authenticates via GitHub OAuth
+2. **Tool Invocation**: Client calls `webCrawl` tool with URL and query
+3. **Page Rendering**: Cloudflare browser renders the target webpage
+4. **Content Extraction**: HTML is parsed to extract all links and metadata
+5. **AI Analysis**: Workers AI analyzes links against the user's query
+6. **Results**: Relevant links are ranked and returned with explanations

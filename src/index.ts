@@ -4,6 +4,7 @@ import { McpAgent } from "agents/mcp";
 import { z } from "zod";
 import { handleAccessRequest } from "./access-handler";
 import type { Props } from "./workers-oauth-utils";
+import { renderPage, validateUrl, BrowserError } from "./browser-utils";
 
 const ALLOWED_EMAILS = new Set(["<INSERT EMAIL>"]);
 
@@ -76,16 +77,49 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 
 	private async handleWebCrawl(url: string, query: string) {
 		try {
-			// TODO: Implement full web crawling functionality
-			// This is a placeholder implementation for now
-			return {
-				content: [
-					{
-						type: "text" as const,
-						text: `Web crawl placeholder: Would crawl ${url} looking for links matching "${query}". Full implementation coming soon.`,
-					},
-				],
-			};
+			// Validate URL first
+			const validation = await validateUrl(url);
+			if (!validation.valid) {
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: `Error: Invalid URL - ${validation.reason}`,
+						},
+					],
+				};
+			}
+
+			// Test browser rendering
+			try {
+				const renderResult = await renderPage(this.env.BROWSER, {
+					url,
+					timeout: 15000,
+					waitUntil: 'load'
+				});
+
+				// For now, return basic page information
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: `Successfully rendered page: ${renderResult.title || 'No title'}\nURL: ${renderResult.url}\nStatus: ${renderResult.status}\nHTML length: ${renderResult.html.length} characters\n\nQuery "${query}" - Full link extraction and AI analysis coming in next implementation phase.`,
+						},
+					],
+				};
+			} catch (error) {
+				if (error instanceof BrowserError) {
+					return {
+						content: [
+							{
+								type: "text" as const,
+								text: `Browser rendering failed: ${error.message} (Code: ${error.code})`,
+							},
+						],
+					};
+				}
+				throw error;
+			}
 		} catch (error) {
 			return {
 				content: [

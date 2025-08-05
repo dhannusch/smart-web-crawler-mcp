@@ -6,6 +6,7 @@ import { handleAccessRequest } from "./access-handler";
 import type { Props } from "./workers-oauth-utils";
 import { renderPage, validateUrl, BrowserError } from "./browser-utils";
 import { extractPageContent } from "./content-extractor";
+import { analyzeLinksWithAI } from "./ai-link-analyzer";
 
 const ALLOWED_EMAILS = new Set(["<INSERT EMAIL>"]);
 
@@ -102,6 +103,14 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 				// Extract links and content from the rendered HTML
 				const extractedContent = extractPageContent(renderResult.html, renderResult.url);
 
+				// Use AI to analyze and rank links based on the query
+				const analysisResult = await analyzeLinksWithAI(
+					this.env.AI,
+					extractedContent,
+					query,
+					25 // Analyze up to 25 links for better performance
+				);
+
 				// Format results for MCP response
 				const linkCount = extractedContent.links.length;
 				const internalLinks = extractedContent.links.filter(l => l.type === 'internal');
@@ -111,29 +120,52 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 				let resultText = `Successfully crawled page: ${extractedContent.title || renderResult.title || 'No title'}\n`;
 				resultText += `URL: ${renderResult.url}\n`;
 				resultText += `Status: ${renderResult.status}\n\n`;
-				resultText += `Found ${linkCount} total links:\n`;
+				resultText += `Found ${linkCount} total links (analyzed ${analysisResult.totalAnalyzed}):\n`;
 				resultText += `- ${internalLinks.length} internal links\n`;
 				resultText += `- ${externalLinks.length} external links\n\n`;
+				resultText += `Query Analysis: ${analysisResult.queryInterpretation}\n\n`;
 
-				// Show relevant links based on query (basic text matching for now)
-				const queryLower = query.toLowerCase();
-				const relevantLinks = extractedContent.links.filter(link => 
-					link.text.toLowerCase().includes(queryLower) || 
-					link.url.toLowerCase().includes(queryLower)
-				);
+				// Show AI-analyzed relevant links
+				if (analysisResult.relevantLinks.length > 0) {
+					resultText += `AI-Analyzed Relevant Links (${analysisResult.relevantLinks.length} found):\n\n`;
+					
+					// Group by relevance score ranges for better presentation
+					const highlyRelevant = analysisResult.relevantLinks.filter(l => l.relevanceScore >= 0.7);
+					const moderatelyRelevant = analysisResult.relevantLinks.filter(l => l.relevanceScore >= 0.4 && l.relevanceScore < 0.7);
+					const somewhatRelevant = analysisResult.relevantLinks.filter(l => l.relevanceScore < 0.4);
 
-				if (relevantLinks.length > 0) {
-					resultText += `Links matching "${query}":\n\n`;
-					for (const link of relevantLinks.slice(0, 10)) { // Limit to first 10 matches
-						resultText += `• ${link.text}\n  ${link.url}\n  Type: ${link.type}\n\n`;
+					if (highlyRelevant.length > 0) {
+						resultText += `🎯 Highly Relevant (${highlyRelevant.length}):\n`;
+						for (const link of highlyRelevant.slice(0, 8)) {
+							resultText += `• ${link.text}\n  ${link.url}\n  Score: ${(link.relevanceScore * 100).toFixed(0)}% - ${link.reasoning}\n  Type: ${link.type}\n\n`;
+						}
 					}
-					if (relevantLinks.length > 10) {
-						resultText += `... and ${relevantLinks.length - 10} more matching links\n`;
+
+					if (moderatelyRelevant.length > 0) {
+						resultText += `🔍 Moderately Relevant (${moderatelyRelevant.length}):\n`;
+						for (const link of moderatelyRelevant.slice(0, 5)) {
+							resultText += `• ${link.text}\n  ${link.url}\n  Score: ${(link.relevanceScore * 100).toFixed(0)}% - ${link.reasoning}\n  Type: ${link.type}\n\n`;
+						}
+					}
+
+					if (somewhatRelevant.length > 0 && (highlyRelevant.length + moderatelyRelevant.length) < 10) {
+						resultText += `📄 Somewhat Relevant (${somewhatRelevant.length}):\n`;
+						for (const link of somewhatRelevant.slice(0, 3)) {
+							resultText += `• ${link.text}\n  ${link.url}\n  Score: ${(link.relevanceScore * 100).toFixed(0)}% - ${link.reasoning}\n  Type: ${link.type}\n\n`;
+						}
+					}
+
+					// Show count of additional links if truncated
+					const totalShown = Math.min(8, highlyRelevant.length) + 
+									 Math.min(5, moderatelyRelevant.length) + 
+									 Math.min(3, somewhatRelevant.length);
+					if (analysisResult.relevantLinks.length > totalShown) {
+						resultText += `... and ${analysisResult.relevantLinks.length - totalShown} more relevant links\n\n`;
 					}
 				} else {
-					resultText += `No links found matching "${query}"\n\n`;
+					resultText += `No links found matching "${query}" based on AI analysis.\n\n`;
 					resultText += `Sample of all links found:\n\n`;
-					for (const link of extractedContent.links.slice(0, 5)) { // Show first 5 links
+					for (const link of extractedContent.links.slice(0, 5)) {
 						resultText += `• ${link.text}\n  ${link.url}\n  Type: ${link.type}\n\n`;
 					}
 					if (extractedContent.links.length > 5) {

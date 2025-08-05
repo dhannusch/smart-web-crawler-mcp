@@ -2,10 +2,12 @@
  * Browser utilities for web crawling using Cloudflare Browser Rendering API
  */
 
+import puppeteer from '@cloudflare/puppeteer'
+
 export interface BrowserRenderOptions {
 	url: string;
 	timeout?: number;
-	waitUntil?: 'load' | 'domcontentloaded' | 'networkidle';
+	waitUntil?: 'load' | 'domcontentloaded' | 'networkidle0' | 'networkidle2';
 }
 
 export interface BrowserRenderResult {
@@ -38,85 +40,63 @@ export async function renderPage(
 		throw new BrowserError(`Invalid URL: ${url}`, 'INVALID_URL');
 	}
 
+	let browserInstance;
+	let page;
+
 	try {
-		const response = await browser.fetch(`http://localhost:9222/json/runtime/evaluate`, {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-			},
-			body: JSON.stringify({
-				expression: `
-					(async () => {
-						try {
-							await page.goto('${url}', { 
-								waitUntil: '${waitUntil}',
-								timeout: ${timeout}
-							});
-							
-							const title = await page.title();
-							const html = await page.content();
-							const finalUrl = page.url();
-							
-							return {
-								html,
-								url: finalUrl,
-								title,
-								status: 200
-							};
-						} catch (error) {
-							return {
-								error: error.message,
-								status: error.name === 'TimeoutError' ? 408 : 500
-							};
-						}
-					})()
-				`
-			})
+		// Launch browser using Cloudflare's Puppeteer
+		browserInstance = await puppeteer.launch(browser);
+		page = await browserInstance.newPage();
+
+		// Set timeout for navigation
+		page.setDefaultTimeout(timeout);
+
+		// Navigate to the URL
+		const response = await page.goto(url, { 
+			waitUntil: waitUntil as any,
+			timeout: timeout
 		});
 
-		if (!response.ok) {
-			throw new BrowserError(
-				`Browser request failed: ${response.status} ${response.statusText}`,
-				'BROWSER_REQUEST_FAILED',
-				response.status
-			);
-		}
+		// Get page content and metadata
+		const title = await page.title();
+		const html = await page.content();
+		const finalUrl = page.url();
+		const status = response?.status() || 200;
 
-		const result = await response.json() as any;
-		
-		if (result.error) {
-			throw new BrowserError(
-				`Browser rendering failed: ${result.error}`,
-				result.status === 408 ? 'TIMEOUT' : 'RENDER_FAILED',
-				result.status
-			);
-		}
-
-		if (result.result?.value) {
-			const { html, url: finalUrl, title, status } = result.result.value;
-			return {
-				html,
-				url: finalUrl,
-				title,
-				status
-			};
-		} else {
-			throw new BrowserError(
-				'Unexpected browser response format',
-				'INVALID_RESPONSE'
-			);
-		}
+		return {
+			html,
+			url: finalUrl,
+			title,
+			status
+		};
 
 	} catch (error) {
-		if (error instanceof BrowserError) {
-			throw error;
+		if (error instanceof Error) {
+			if (error.name === 'TimeoutError') {
+				throw new BrowserError(
+					`Page load timeout: ${url}`,
+					'TIMEOUT',
+					408
+				);
+			}
+			throw new BrowserError(
+				`Browser rendering failed: ${error.message}`,
+				'RENDER_FAILED'
+			);
 		}
 		
-		// Handle network and other errors
 		throw new BrowserError(
-			`Browser operation failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+			`Browser operation failed: Unknown error`,
 			'BROWSER_OPERATION_FAILED'
 		);
+	} finally {
+		// Clean up resources
+		try {
+			if (page) await page.close();
+			if (browserInstance) await browserInstance.close();
+		} catch (cleanupError) {
+			console.warn('Browser cleanup warning:', cleanupError);
+		}
 	}
 }
 

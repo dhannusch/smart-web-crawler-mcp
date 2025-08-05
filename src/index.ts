@@ -5,6 +5,7 @@ import { z } from "zod";
 import { handleAccessRequest } from "./access-handler";
 import type { Props } from "./workers-oauth-utils";
 import { renderPage, validateUrl, BrowserError } from "./browser-utils";
+import { extractPageContent } from "./content-extractor";
 
 const ALLOWED_EMAILS = new Set(["<INSERT EMAIL>"]);
 
@@ -90,7 +91,7 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 				};
 			}
 
-			// Test browser rendering
+			// Render the page using browser
 			try {
 				const renderResult = await renderPage(this.env.BROWSER, {
 					url,
@@ -98,12 +99,53 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 					waitUntil: 'load'
 				});
 
-				// For now, return basic page information
+				// Extract links and content from the rendered HTML
+				const extractedContent = extractPageContent(renderResult.html, renderResult.url);
+
+				// Format results for MCP response
+				const linkCount = extractedContent.links.length;
+				const internalLinks = extractedContent.links.filter(l => l.type === 'internal');
+				const externalLinks = extractedContent.links.filter(l => l.type === 'external');
+
+				// Create a summary of found links
+				let resultText = `Successfully crawled page: ${extractedContent.title || renderResult.title || 'No title'}\n`;
+				resultText += `URL: ${renderResult.url}\n`;
+				resultText += `Status: ${renderResult.status}\n\n`;
+				resultText += `Found ${linkCount} total links:\n`;
+				resultText += `- ${internalLinks.length} internal links\n`;
+				resultText += `- ${externalLinks.length} external links\n\n`;
+
+				// Show relevant links based on query (basic text matching for now)
+				const queryLower = query.toLowerCase();
+				const relevantLinks = extractedContent.links.filter(link => 
+					link.text.toLowerCase().includes(queryLower) || 
+					link.url.toLowerCase().includes(queryLower)
+				);
+
+				if (relevantLinks.length > 0) {
+					resultText += `Links matching "${query}":\n\n`;
+					for (const link of relevantLinks.slice(0, 10)) { // Limit to first 10 matches
+						resultText += `• ${link.text}\n  ${link.url}\n  Type: ${link.type}\n\n`;
+					}
+					if (relevantLinks.length > 10) {
+						resultText += `... and ${relevantLinks.length - 10} more matching links\n`;
+					}
+				} else {
+					resultText += `No links found matching "${query}"\n\n`;
+					resultText += `Sample of all links found:\n\n`;
+					for (const link of extractedContent.links.slice(0, 5)) { // Show first 5 links
+						resultText += `• ${link.text}\n  ${link.url}\n  Type: ${link.type}\n\n`;
+					}
+					if (extractedContent.links.length > 5) {
+						resultText += `... and ${extractedContent.links.length - 5} more links\n`;
+					}
+				}
+
 				return {
 					content: [
 						{
 							type: "text" as const,
-							text: `Successfully rendered page: ${renderResult.title || 'No title'}\nURL: ${renderResult.url}\nStatus: ${renderResult.status}\nHTML length: ${renderResult.html.length} characters\n\nQuery "${query}" - Full link extraction and AI analysis coming in next implementation phase.`,
+							text: resultText,
 						},
 					],
 				};

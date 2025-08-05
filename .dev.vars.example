@@ -1,6 +1,3 @@
-ACCESS_CLIENT_ID=<Copy from "Client ID" in dash>
-ACCESS_CLIENT_SECRET=<Copy from "Client secret" in dash>
-ACCESS_TOKEN_URL=<Copy from "Token endpoint" in dash>
-ACCESS_AUTHORIZATION_URL=<Copy from "Authorization endpoint" in dash>
-ACCESS_JWKS_URL=<Copy from "Key endpoint" in dash>
-COOKIE_ENCRYPTION_KEY=<generate using, eg, `openssl rand -hex 32`>
+GITHUB_CLIENT_ID=<your github client id>
+GITHUB_CLIENT_SECRET=<your github client secret>
+COOKIE_ENCRYPTION_KEY=<your cookie cookie encryption key>.

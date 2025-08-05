@@ -8,7 +8,7 @@ import { renderPage, validateUrl, BrowserError } from "./browser-utils";
 import { extractPageContent } from "./content-extractor";
 import { analyzeLinksWithAI } from "./ai-link-analyzer";
 
-const ALLOWED_EMAILS = new Set(["<INSERT EMAIL>"]);
+const ALLOWED_EMAILS = new Set(["dennischarleshannusch@gmail.com"]);
 
 export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 	server = new McpServer({
@@ -17,47 +17,8 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 	});
 
 	async init() {
-		// Hello, world!
-		this.server.tool(
-			"add",
-			"Add two numbers the way only MCP can",
-			{ a: z.number(), b: z.number() },
-			async ({ a, b }) => ({
-				content: [{ text: String(a + b), type: "text" }],
-			}),
-		);
-
-		// Dynamically add tools based on the user's login. In this case, I want to limit
-		// access to my Image Generation tool to just me
+		// Add web crawl tool with access control
 		if (ALLOWED_EMAILS.has(this.props.email)) {
-			this.server.tool(
-				"generateImage",
-				"Generate an image using the `flux-1-schnell` model. Works best with 8 steps.",
-				{
-					prompt: z
-						.string()
-						.describe("A text description of the image you want to generate."),
-					steps: z
-						.number()
-						.min(4)
-						.max(8)
-						.default(4)
-						.describe(
-							"The number of diffusion steps; higher values can improve quality but take longer. Must be between 4 and 8, inclusive.",
-						),
-				},
-				async ({ prompt, steps }) => {
-					const response = await this.env.AI.run("@cf/black-forest-labs/flux-1-schnell", {
-						prompt,
-						steps,
-					});
-
-					return {
-						content: [{ data: response.image!, mimeType: "image/jpeg", type: "image" }],
-					};
-				},
-			);
-
 			this.server.tool(
 				"webCrawl",
 				"Crawl a web page and extract relevant links based on a search query using AI analysis",
@@ -73,6 +34,24 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 				async ({ url, query }) => {
 					return await this.handleWebCrawl(url, query);
 				},
+			);
+		} else {
+			// Provide helpful error message for unauthorized users
+			this.server.tool(
+				"webCrawl",
+				"Web crawling functionality (access restricted)",
+				{
+					url: z.string().url(),
+					query: z.string(),
+				},
+				async () => ({
+					content: [
+						{
+							type: "text" as const,
+							text: `Access denied: Web crawling is restricted to authorized users. Your email (${this.props.email}) is not in the allowed list.`,
+						},
+					],
+				}),
 			);
 		}
 	}

@@ -54,6 +54,47 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 					};
 				},
 			);
+
+			this.server.tool(
+				"webCrawl",
+				"Crawl a web page and extract relevant links based on a search query using AI analysis",
+				{
+					url: z
+						.string()
+						.url()
+						.describe("The URL of the web page to crawl"),
+					query: z
+						.string()
+						.describe("A search query to filter and find relevant links from the crawled page"),
+				},
+				async ({ url, query }) => {
+					return await this.handleWebCrawl(url, query);
+				},
+			);
+		}
+	}
+
+	private async handleWebCrawl(url: string, query: string) {
+		try {
+			// TODO: Implement full web crawling functionality
+			// This is a placeholder implementation for now
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: `Web crawl placeholder: Would crawl ${url} looking for links matching "${query}". Full implementation coming soon.`,
+					},
+				],
+			};
+		} catch (error) {
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: `Error crawling ${url}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+					},
+				],
+			};
 		}
 	}
 }

@@ -1,3 +1,5 @@
 GITHUB_CLIENT_ID=<your github client id>
 GITHUB_CLIENT_SECRET=<your github client secret>
 COOKIE_ENCRYPTION_KEY=<your cookie cookie encryption key>.
+CLOUDFLARE_API_TOKEN=<your cloudflare api token>
+CLOUDFLARE_ACCOUNT_ID=<your cloudflare account id>

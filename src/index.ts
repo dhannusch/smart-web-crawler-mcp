@@ -2,20 +2,12 @@ import OAuthProvider from '@cloudflare/workers-oauth-provider'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { McpAgent } from 'agents/mcp'
 import { z } from 'zod'
-import { renderPage, validateUrl, BrowserError } from './browser-utils'
-import { extractPageContent } from './content-extractor'
+import { renderPage, extractLinks, validateUrl, BrowserError, CloudflareBrowserBinding } from './browser-utils'
+import { extractPageContentFromMarkdown } from './content-extractor'
 import { analyzeLinksWithAI } from './ai-link-analyzer'
 import { GitHubHandler } from './github-handler'
 import { Octokit } from 'octokit'
-
-// Context from the auth process, encrypted & stored in the auth token
-// and provided to the DurableMCP as this.props
-type Props = {
-  login: string
-  name: string
-  email: string
-  accessToken: string
-}
+import type { Props } from './utils'
 
 const ALLOWED_USERNAMES = new Set<string>([
   'dhannusch',
@@ -75,16 +67,23 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
         }
       }
 
-      // Render the page using browser
+      // Render the page using Cloudflare Browser Rendering API
       try {
-        const renderResult = await renderPage(this.env.BROWSER, {
+        const browserConfig: CloudflareBrowserBinding = {
+          accountId: this.env.CLOUDFLARE_ACCOUNT_ID,
+          apiToken: this.env.CLOUDFLARE_API_TOKEN
+        };
+
+        const renderResult = await renderPage(browserConfig, {
           url,
           timeout: 15000,
-          waitUntil: 'load',
-        })
+        });
 
-        // Extract links and content from the rendered HTML
-        const extractedContent = extractPageContent(renderResult.html, renderResult.url)
+        // Extract links using the new REST API
+        const linksResult = await extractLinks(browserConfig, url, false, 15000);
+
+        // Extract content from markdown and combine with extracted links
+        const extractedContent = extractPageContentFromMarkdown(renderResult.markdown, renderResult.url, linksResult.links)
 
         // Use AI to analyze and rank links based on the query
         const analysisResult = await analyzeLinksWithAI(
@@ -118,21 +117,21 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
           const somewhatRelevant = analysisResult.relevantLinks.filter((l) => l.relevanceScore < 0.4)
 
           if (highlyRelevant.length > 0) {
-            resultText += `🎯 Highly Relevant (${highlyRelevant.length}):\n`
+            resultText += `Highly Relevant (${highlyRelevant.length}):\n`
             for (const link of highlyRelevant.slice(0, 8)) {
               resultText += `• ${link.text}\n  ${link.url}\n  Score: ${(link.relevanceScore * 100).toFixed(0)}% - ${link.reasoning}\n  Type: ${link.type}\n\n`
             }
           }
 
           if (moderatelyRelevant.length > 0) {
-            resultText += `🔍 Moderately Relevant (${moderatelyRelevant.length}):\n`
+            resultText += `Moderately Relevant (${moderatelyRelevant.length}):\n`
             for (const link of moderatelyRelevant.slice(0, 5)) {
               resultText += `• ${link.text}\n  ${link.url}\n  Score: ${(link.relevanceScore * 100).toFixed(0)}% - ${link.reasoning}\n  Type: ${link.type}\n\n`
             }
           }
 
           if (somewhatRelevant.length > 0 && highlyRelevant.length + moderatelyRelevant.length < 10) {
-            resultText += `📄 Somewhat Relevant (${somewhatRelevant.length}):\n`
+            resultText += `Somewhat Relevant (${somewhatRelevant.length}):\n`
             for (const link of somewhatRelevant.slice(0, 3)) {
               resultText += `• ${link.text}\n  ${link.url}\n  Score: ${(link.relevanceScore * 100).toFixed(0)}% - ${link.reasoning}\n  Type: ${link.type}\n\n`
             }

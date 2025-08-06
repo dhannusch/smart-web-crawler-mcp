@@ -91,7 +91,6 @@ export async function analyzeLinksWithAI(
     }
   } catch (error) {
     // Fallback to simple text matching if AI fails
-    console.error('AI analysis failed, falling back to text matching:', error)
     return fallbackTextAnalysis(linksToAnalyze, userQuery, isShortQuery ? 0.05 : 0.1)
   }
 }
@@ -250,7 +249,6 @@ function parseAIResponse(
       queryInterpretation,
     }
   } catch (error) {
-    console.error('Failed to parse AI response:', error, 'Response:', aiResponse)
     throw new Error(`Invalid AI response format: ${error instanceof Error ? error.message : 'Unknown error'}`)
   }
 }

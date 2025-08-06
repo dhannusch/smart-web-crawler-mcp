@@ -8,8 +8,9 @@ declare namespace Cloudflare {
 		GITHUB_CLIENT_SECRET: string;
 		COOKIE_ENCRYPTION_KEY: string;
 		MCP_OBJECT: DurableObjectNamespace<import("./src/index").MyMCP>;
-		BROWSER: Fetcher;
 		AI: Ai;
+		CLOUDFLARE_ACCOUNT_ID: string;
+		CLOUDFLARE_API_TOKEN: string;
 	}
 }
 interface Env extends Cloudflare.Env {}

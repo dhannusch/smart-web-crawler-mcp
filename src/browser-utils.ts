@@ -1,20 +1,36 @@
 /**
- * Browser utilities for web crawling using Cloudflare Browser Rendering API
+ * Browser utilities for web crawling using Cloudflare Browser Rendering REST API
  */
-
-import puppeteer from '@cloudflare/puppeteer'
 
 export interface BrowserRenderOptions {
 	url: string;
 	timeout?: number;
-	waitUntil?: 'load' | 'domcontentloaded' | 'networkidle0' | 'networkidle2';
+	rejectRequestPattern?: string[];
 }
 
 export interface BrowserRenderResult {
 	html: string;
+	markdown: string;
 	url: string;
 	title?: string;
 	status: number;
+}
+
+export interface LinksResult {
+	links: string[];
+	url: string;
+	status: number;
+}
+
+export interface CloudflareBrowserBinding {
+	accountId: string;
+	apiToken: string;
+}
+
+interface CloudflareApiResponse<T> {
+	success: boolean;
+	result: T;
+	errors?: Array<{ code: number; message: string }>;
 }
 
 export class BrowserError extends Error {
@@ -25,79 +41,189 @@ export class BrowserError extends Error {
 }
 
 /**
- * Render a web page using Cloudflare Browser Rendering API
+ * Render a web page using Cloudflare Browser Rendering REST API
  */
 export async function renderPage(
-	browser: Fetcher,
+	browserConfig: CloudflareBrowserBinding,
 	options: BrowserRenderOptions
 ): Promise<BrowserRenderResult> {
-	const { url, timeout = 30000, waitUntil = 'load' } = options;
+	const { url, timeout = 30000, rejectRequestPattern } = options;
+
+	// Validate URL
+	validateUrlOrThrow(url);
 
 	try {
-		// Validate URL
+		// Prepare request body
+		const requestBody: any = { url };
+		if (rejectRequestPattern) {
+			requestBody.rejectRequestPattern = rejectRequestPattern;
+		}
+
+		// Call Cloudflare Browser Rendering API
+		const response = await fetch(
+			`https://api.cloudflare.com/client/v4/accounts/${browserConfig.accountId}/browser-rendering/markdown`,
+			{
+				method: 'POST',
+				headers: {
+					'Authorization': `Bearer ${browserConfig.apiToken}`,
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify(requestBody),
+				signal: AbortSignal.timeout(timeout)
+			}
+		);
+
+		if (!response.ok) {
+			throw new BrowserError(
+				`API request failed: ${response.status} ${response.statusText}`,
+				'API_ERROR',
+				response.status
+			);
+		}
+
+		const data = await response.json() as CloudflareApiResponse<string>;
+
+		if (!data.success) {
+			throw new BrowserError(
+				`Browser rendering failed: ${JSON.stringify(data.errors || 'Unknown error')}`,
+				'RENDER_FAILED'
+			);
+		}
+
+		// Extract title from markdown content (first # heading)
+		const markdown = data.result;
+		const titleMatch = markdown.match(/^# (.+)$/m);
+		const title = titleMatch ? titleMatch[1] : undefined;
+
+		return {
+			html: '', // HTML not available from markdown endpoint
+			markdown,
+			url,
+			title,
+			status: response.status
+		};
+
+	} catch (error) {
+		throw handleBrowserError(error, url, 'Browser rendering failed');
+	}
+}
+
+/**
+ * Extract links from a web page using Cloudflare Browser Rendering REST API
+ */
+export async function extractLinks(
+	browserConfig: CloudflareBrowserBinding,
+	url: string,
+	visibleLinksOnly: boolean = false,
+	timeout: number = 30000
+): Promise<LinksResult> {
+	// Validate URL
+	validateUrlOrThrow(url);
+
+	try {
+		// Call Cloudflare Browser Rendering API
+		const response = await fetch(
+			`https://api.cloudflare.com/client/v4/accounts/${browserConfig.accountId}/browser-rendering/links`,
+			{
+				method: 'POST',
+				headers: {
+					'Authorization': `Bearer ${browserConfig.apiToken}`,
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({ url, visibleLinksOnly }),
+				signal: AbortSignal.timeout(timeout)
+			}
+		);
+
+		if (!response.ok) {
+			throw new BrowserError(
+				`API request failed: ${response.status} ${response.statusText}`,
+				'API_ERROR',
+				response.status
+			);
+		}
+
+		const data = await response.json() as CloudflareApiResponse<string[]>;
+
+		if (!data.success) {
+			throw new BrowserError(
+				`Link extraction failed: ${JSON.stringify(data.errors || 'Unknown error')}`,
+				'EXTRACTION_FAILED'
+			);
+		}
+
+		return {
+			links: data.result,
+			url,
+			status: response.status
+		};
+
+	} catch (error) {
+		throw handleBrowserError(error, url, 'Link extraction failed');
+	}
+}
+
+/**
+ * Validate URL and throw error if invalid
+ */
+function validateUrlOrThrow(url: string): void {
+	try {
 		new URL(url);
 	} catch (error) {
 		throw new BrowserError(`Invalid URL: ${url}`, 'INVALID_URL');
 	}
+}
 
-	let browserInstance;
-	let page;
-
-	try {
-		// Launch browser using Cloudflare's Puppeteer
-		browserInstance = await puppeteer.launch(browser);
-		page = await browserInstance.newPage();
-
-		// Set timeout for navigation
-		page.setDefaultTimeout(timeout);
-
-		// Navigate to the URL
-		const response = await page.goto(url, { 
-			waitUntil: waitUntil as any,
-			timeout: timeout
-		});
-
-		// Get page content and metadata
-		const title = await page.title();
-		const html = await page.content();
-		const finalUrl = page.url();
-		const status = response?.status() || 200;
-
-		return {
-			html,
-			url: finalUrl,
-			title,
-			status
-		};
-
-	} catch (error) {
-		if (error instanceof Error) {
-			if (error.name === 'TimeoutError') {
-				throw new BrowserError(
-					`Page load timeout: ${url}`,
-					'TIMEOUT',
-					408
-				);
-			}
-			throw new BrowserError(
-				`Browser rendering failed: ${error.message}`,
-				'RENDER_FAILED'
+/**
+ * Handle browser operation errors consistently
+ */
+function handleBrowserError(error: unknown, url: string, operation: string): BrowserError {
+	if (error instanceof BrowserError) {
+		return error;
+	}
+	
+	if (error instanceof Error) {
+		if (error.name === 'TimeoutError' || error.name === 'AbortError') {
+			return new BrowserError(
+				`Request timeout: ${url}`,
+				'TIMEOUT',
+				408
 			);
 		}
-		
-		throw new BrowserError(
-			`Browser operation failed: Unknown error`,
-			'BROWSER_OPERATION_FAILED'
+		return new BrowserError(
+			`${operation}: ${error.message}`,
+			'OPERATION_FAILED'
 		);
-	} finally {
-		// Clean up resources
-		try {
-			if (page) await page.close();
-			if (browserInstance) await browserInstance.close();
-		} catch (cleanupError) {
-			console.warn('Browser cleanup warning:', cleanupError);
-		}
 	}
+	
+	return new BrowserError(
+		`${operation}: Unknown error`,
+		'OPERATION_FAILED'
+	);
+}
+
+/**
+ * Check if hostname is a private or local address
+ */
+function isPrivateOrLocalAddress(hostname: string): boolean {
+	const lower = hostname.toLowerCase();
+	
+	// Localhost variations
+	if (lower === 'localhost' || lower === '127.0.0.1') {
+		return true;
+	}
+	
+	// Private IP ranges (RFC 1918)
+	const privatePatterns = [
+		'192.168.',  // Class C private (192.168.0.0 - 192.168.255.255)
+		'10.',       // Class A private (10.0.0.0 - 10.255.255.255)
+		'172.16.', '172.17.', '172.18.', '172.19.', // Class B private range start
+		'172.20.', '172.21.', '172.22.', '172.23.',
+		'172.24.', '172.25.', '172.26.', '172.27.',
+		'172.28.', '172.29.', '172.30.', '172.31.'  // Class B private range end
+	];
+	
+	return privatePatterns.some(pattern => lower.startsWith(pattern));
 }
 
 /**
@@ -113,18 +239,7 @@ export async function validateUrl(url: string): Promise<{ valid: boolean; reason
 		}
 		
 		// Prevent localhost/private IP access
-		const hostname = parsedUrl.hostname.toLowerCase();
-		if (hostname === 'localhost' || 
-			hostname === '127.0.0.1' || 
-			hostname.startsWith('192.168.') ||
-			hostname.startsWith('10.') ||
-			hostname.startsWith('172.16.') ||
-			hostname.startsWith('172.17.') ||
-			hostname.startsWith('172.18.') ||
-			hostname.startsWith('172.19.') ||
-			hostname.startsWith('172.2') ||
-			hostname.startsWith('172.30.') ||
-			hostname.startsWith('172.31.')) {
+		if (isPrivateOrLocalAddress(parsedUrl.hostname)) {
 			return { valid: false, reason: 'Private/local addresses are not allowed' };
 		}
 		

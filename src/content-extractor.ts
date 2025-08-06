@@ -16,19 +16,53 @@ export interface ExtractedLink {
 }
 
 /**
- * Extract links and content from HTML for AI analysis
+ * Extract content from HTML (legacy mode)
  */
-export function extractPageContent(html: string, baseUrl: string): ExtractedContent {
-	// Parse HTML - basic regex-based parsing for Worker environment
+export function extractPageContentFromHtml(html: string, baseUrl: string): ExtractedContent {
 	const links = extractLinks(html, baseUrl);
 	const pageText = extractText(html);
 	const title = extractTitle(html);
-
+	
 	return {
 		links,
 		pageText,
 		title
 	};
+}
+
+/**
+ * Extract content from markdown with pre-extracted links (current REST API mode)
+ */
+export function extractPageContentFromMarkdown(
+	markdown: string, 
+	baseUrl: string, 
+	extractedLinks: string[]
+): ExtractedContent {
+	const links = processExtractedLinks(extractedLinks, baseUrl);
+	const pageText = extractTextFromMarkdown(markdown);
+	const title = extractTitleFromMarkdown(markdown);
+	
+	return {
+		links,
+		pageText,
+		title
+	};
+}
+
+/**
+ * Extract content from either HTML or markdown with optional pre-extracted links
+ * @deprecated Use extractPageContentFromHtml or extractPageContentFromMarkdown instead
+ */
+export function extractPageContent(
+	content: string,
+	baseUrl: string,
+	extractedLinks?: string[]
+): ExtractedContent {
+	if (extractedLinks) {
+		return extractPageContentFromMarkdown(content, baseUrl, extractedLinks);
+	} else {
+		return extractPageContentFromHtml(content, baseUrl);
+	}
 }
 
 /**
@@ -182,4 +216,112 @@ function isNonContentLink(href: string): boolean {
 	}
 	
 	return false;
+}
+
+/**
+ * Process pre-extracted links from Cloudflare Browser API
+ */
+function processExtractedLinks(extractedLinks: string[], baseUrl: string): ExtractedLink[] {
+	const links: ExtractedLink[] = [];
+	const baseUrlObj = new URL(baseUrl);
+	
+	for (const url of extractedLinks) {
+		// Skip non-content links
+		if (isNonContentLink(url)) {
+			continue;
+		}
+		
+		try {
+			const absoluteUrl = resolveUrl(url, baseUrl);
+			const absoluteUrlObj = new URL(absoluteUrl);
+			
+			// Generate a basic text representation from URL
+			const linkText = generateLinkText(absoluteUrl);
+			
+			const link: ExtractedLink = {
+				url: absoluteUrl,
+				text: linkText,
+				type: absoluteUrlObj.hostname === baseUrlObj.hostname ? 'internal' : 'external'
+			};
+			
+			// Avoid duplicates
+			if (!links.some(l => l.url === absoluteUrl)) {
+				links.push(link);
+			}
+		} catch (error) {
+			// Skip malformed URLs
+			continue;
+		}
+	}
+	
+	return links;
+}
+
+/**
+ * Generate link text from URL when actual link text is not available
+ */
+function generateLinkText(url: string): string {
+	try {
+		const urlObj = new URL(url);
+		
+		// Use the last part of the pathname if available
+		if (urlObj.pathname && urlObj.pathname !== '/') {
+			const pathParts = urlObj.pathname.split('/').filter(Boolean);
+			if (pathParts.length > 0) {
+				const lastPart = pathParts[pathParts.length - 1];
+				// Clean up common file extensions and make readable
+				return lastPart
+					.replace(/\.[^.]*$/, '') // Remove file extension
+					.replace(/[-_]/g, ' ') // Replace dashes and underscores with spaces
+					.replace(/\b\w/g, l => l.toUpperCase()); // Title case
+			}
+		}
+		
+		// Fallback to hostname
+		return urlObj.hostname.replace(/^www\./, '');
+	} catch (error) {
+		// Fallback to the URL itself if parsing fails
+		return url.length > 50 ? url.substring(0, 50) + '...' : url;
+	}
+}
+
+/**
+ * Extract readable text content from markdown
+ */
+function extractTextFromMarkdown(markdown: string): string {
+	// Remove markdown syntax but keep the text content
+	let text = markdown
+		// Remove code blocks
+		.replace(/```[\s\S]*?```/g, '')
+		// Remove inline code
+		.replace(/`[^`]*`/g, '')
+		// Remove headers markdown but keep text
+		.replace(/^#{1,6}\s+(.*)$/gm, '$1')
+		// Remove bold/italic markdown
+		.replace(/\*\*([^*]+)\*\*/g, '$1')
+		.replace(/\*([^*]+)\*/g, '$1')
+		.replace(/__([^_]+)__/g, '$1')
+		.replace(/_([^_]+)_/g, '$1')
+		// Remove links but keep text
+		.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+		// Remove images
+		.replace(/!\[[^\]]*\]\([^)]+\)/g, '')
+		// Remove horizontal rules
+		.replace(/^---+$/gm, '')
+		// Remove blockquote markers
+		.replace(/^>\s+/gm, '');
+	
+	// Normalize whitespace
+	text = text.replace(/\s+/g, ' ').trim();
+	
+	// Limit text length for AI processing (keep first 3000 chars)
+	return text.length > 3000 ? text.substring(0, 3000) + '...' : text;
+}
+
+/**
+ * Extract page title from markdown (first # heading)
+ */
+function extractTitleFromMarkdown(markdown: string): string | undefined {
+	const titleMatch = markdown.match(/^#\s+(.+)$/m);
+	return titleMatch ? titleMatch[1].trim() : undefined;
 }

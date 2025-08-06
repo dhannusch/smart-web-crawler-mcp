@@ -7,22 +7,6 @@ const ONE_YEAR_IN_SECONDS = 31536000
 
 // --- Helper Functions ---
 
-/**
- * Encodes arbitrary data to a URL-safe base64 string.
- * @param data - The data to encode (will be stringified).
- * @returns A URL-safe base64 encoded string.
- */
-function _encodeState(data: any): string {
-  try {
-    const jsonString = JSON.stringify(data)
-    // Use btoa for simplicity, assuming Worker environment supports it well enough
-    // For complex binary data, a Buffer/Uint8Array approach might be better
-    return btoa(jsonString)
-  } catch (e) {
-    console.error('Error encoding state:', e)
-    throw new Error('Could not encode state')
-  }
-}
 
 /**
  * Decodes a URL-safe base64 string back to its original data.

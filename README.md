@@ -69,13 +69,15 @@ You now have a remote MCP server deployed!
 
 This MCP server uses GitHub OAuth for authentication. All authenticated users can access the `userInfoOctokit` tool to get their GitHub profile information.
 
-The `webCrawl` tool is restricted to specific GitHub users listed in the `ALLOWED_USERNAMES` configuration:
+The `webCrawl` tool is restricted to specific GitHub users listed in the `ALLOWED_USERNAMES` configuration in `src/index.ts`:
 
 ```typescript
 // Add GitHub usernames who should have access to web crawling
 const ALLOWED_USERNAMES = new Set<string>([
-  'dhannusch',
+  'your-github-username',
   // Add more GitHub usernames here
+  // 'teammate-username',
+  // 'coworker-username'
 ])
 ```
 

@@ -50,7 +50,7 @@ export async function renderPage(
 	const { url, timeout = 30000, rejectRequestPattern } = options;
 
 	// Validate URL
-	validateUrlOrThrow(url);
+	await validateUrlOrThrow(url);
 
 	try {
 		// Prepare request body
@@ -118,7 +118,7 @@ export async function extractLinks(
 	timeout: number = 30000
 ): Promise<LinksResult> {
 	// Validate URL
-	validateUrlOrThrow(url);
+	await validateUrlOrThrow(url);
 
 	try {
 		// Call Cloudflare Browser Rendering API
@@ -166,11 +166,10 @@ export async function extractLinks(
 /**
  * Validate URL and throw error if invalid
  */
-function validateUrlOrThrow(url: string): void {
-	try {
-		new URL(url);
-	} catch (error) {
-		throw new BrowserError(`Invalid URL: ${url}`, 'INVALID_URL');
+async function validateUrlOrThrow(url: string): Promise<void> {
+	const validation = await validateUrl(url);
+	if (!validation.valid) {
+		throw new BrowserError(`Invalid URL: ${validation.reason}`, 'INVALID_URL');
 	}
 }
 
@@ -249,24 +248,3 @@ export async function validateUrl(url: string): Promise<{ valid: boolean; reason
 	}
 }
 
-/**
- * Extract basic page information without full rendering (for quick checks)
- */
-export async function getPageInfo(url: string): Promise<{ title?: string; status: number }> {
-	try {
-		const response = await fetch(url, {
-			method: 'HEAD',
-			headers: {
-				'User-Agent': 'Cloudflare-Workers-Web-Crawler/1.0'
-			}
-		});
-		
-		return {
-			status: response.status
-		};
-	} catch (error) {
-		return {
-			status: 0 // Network error
-		};
-	}
-}

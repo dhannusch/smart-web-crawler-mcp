@@ -16,22 +16,7 @@ export interface ExtractedLink {
 }
 
 /**
- * Extract content from HTML (legacy mode)
- */
-export function extractPageContentFromHtml(html: string, baseUrl: string): ExtractedContent {
-	const links = extractLinks(html, baseUrl);
-	const pageText = extractText(html);
-	const title = extractTitle(html);
-	
-	return {
-		links,
-		pageText,
-		title
-	};
-}
-
-/**
- * Extract content from markdown with pre-extracted links (current REST API mode)
+ * Extract content from markdown with pre-extracted links
  */
 export function extractPageContentFromMarkdown(
 	markdown: string, 
@@ -47,102 +32,6 @@ export function extractPageContentFromMarkdown(
 		pageText,
 		title
 	};
-}
-
-/**
- * Extract content from either HTML or markdown with optional pre-extracted links
- * @deprecated Use extractPageContentFromHtml or extractPageContentFromMarkdown instead
- */
-export function extractPageContent(
-	content: string,
-	baseUrl: string,
-	extractedLinks?: string[]
-): ExtractedContent {
-	if (extractedLinks) {
-		return extractPageContentFromMarkdown(content, baseUrl, extractedLinks);
-	} else {
-		return extractPageContentFromHtml(content, baseUrl);
-	}
-}
-
-/**
- * Extract all links from HTML content
- */
-function extractLinks(html: string, baseUrl: string): ExtractedLink[] {
-	const links: ExtractedLink[] = [];
-	const baseUrlObj = new URL(baseUrl);
-	
-	// Match all <a> tags with href attributes
-	const linkRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>([^<]*(?:<[^>]*>[^<]*)*?)<\/a>/gi;
-	let match;
-
-	while ((match = linkRegex.exec(html)) !== null) {
-		const href = match[1];
-		const linkText = match[2]
-			.replace(/<[^>]*>/g, '') // Remove HTML tags
-			.replace(/\s+/g, ' ') // Normalize whitespace
-			.trim();
-
-		// Skip empty links or non-content links
-		if (!href || isNonContentLink(href) || !linkText) {
-			continue;
-		}
-
-		try {
-			const absoluteUrl = resolveUrl(href, baseUrl);
-			const absoluteUrlObj = new URL(absoluteUrl);
-			
-			const link: ExtractedLink = {
-				url: absoluteUrl,
-				text: linkText,
-				type: absoluteUrlObj.hostname === baseUrlObj.hostname ? 'internal' : 'external'
-			};
-
-			// Avoid duplicates
-			if (!links.some(l => l.url === absoluteUrl)) {
-				links.push(link);
-			}
-		} catch (error) {
-			// Skip malformed URLs
-			continue;
-		}
-	}
-
-	return links;
-}
-
-/**
- * Extract readable text content from HTML
- */
-function extractText(html: string): string {
-	// Remove script and style elements completely
-	let text = html.replace(/<(script|style|noscript)[^>]*>[\s\S]*?<\/\1>/gi, '');
-	
-	// Remove HTML tags but keep the text content
-	text = text.replace(/<[^>]*>/g, ' ');
-	
-	// Decode common HTML entities
-	text = text
-		.replace(/&amp;/g, '&')
-		.replace(/&lt;/g, '<')
-		.replace(/&gt;/g, '>')
-		.replace(/&quot;/g, '"')
-		.replace(/&#39;/g, "'")
-		.replace(/&nbsp;/g, ' ');
-	
-	// Normalize whitespace
-	text = text.replace(/\s+/g, ' ').trim();
-	
-	// Limit text length for AI processing (keep first 3000 chars)
-	return text.length > 3000 ? text.substring(0, 3000) + '...' : text;
-}
-
-/**
- * Extract page title from HTML
- */
-function extractTitle(html: string): string | undefined {
-	const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
-	return titleMatch ? titleMatch[1].trim() : undefined;
 }
 
 /**

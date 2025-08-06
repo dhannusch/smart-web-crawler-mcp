@@ -10,8 +10,7 @@ import { Octokit } from 'octokit'
 import type { Props } from './utils'
 
 const ALLOWED_USERNAMES = new Set<string>([
-  'dhannusch',
-  // Add GitHub usernames of users who should have access to the image generation tool
+  // Add GitHub usernames of users who should have access to the web crawling tool
   // For example: 'yourusername', 'coworkerusername'
 ])
 
@@ -35,8 +34,8 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
       }
     })
 
-    // Dynamically add tools based on the user's login. In this case, I want to limit
-    // access to my Image Generation tool to just me
+    // Dynamically add tools based on the user's login. In this case, we limit
+    // access to the web crawling tool to specific users
     if (ALLOWED_USERNAMES.has(this.props.login)) {
       this.server.tool(
         'webCrawl',
@@ -71,16 +70,16 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
       try {
         const browserConfig: CloudflareBrowserBinding = {
           accountId: this.env.CLOUDFLARE_ACCOUNT_ID,
-          apiToken: this.env.CLOUDFLARE_API_TOKEN
-        };
+          apiToken: this.env.CLOUDFLARE_API_TOKEN,
+        }
 
         const renderResult = await renderPage(browserConfig, {
           url,
           timeout: 15000,
-        });
+        })
 
         // Extract links using the new REST API
-        const linksResult = await extractLinks(browserConfig, url, false, 15000);
+        const linksResult = await extractLinks(browserConfig, url, false, 15000)
 
         // Extract content from markdown and combine with extracted links
         const extractedContent = extractPageContentFromMarkdown(renderResult.markdown, renderResult.url, linksResult.links)
@@ -112,34 +111,29 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
           resultText += `AI-Analyzed Relevant Links (${analysisResult.relevantLinks.length} found):\n\n`
 
           // Group by relevance score ranges for better presentation
-          const highlyRelevant = analysisResult.relevantLinks.filter((l) => l.relevanceScore >= 0.7)
-          const moderatelyRelevant = analysisResult.relevantLinks.filter((l) => l.relevanceScore >= 0.4 && l.relevanceScore < 0.7)
-          const somewhatRelevant = analysisResult.relevantLinks.filter((l) => l.relevanceScore < 0.4)
+          const relevanceGroups = [
+            { name: 'Highly Relevant', links: analysisResult.relevantLinks.filter((l) => l.relevanceScore >= 0.7), limit: 8 },
+            {
+              name: 'Moderately Relevant',
+              links: analysisResult.relevantLinks.filter((l) => l.relevanceScore >= 0.4 && l.relevanceScore < 0.7),
+              limit: 5,
+            },
+            { name: 'Somewhat Relevant', links: analysisResult.relevantLinks.filter((l) => l.relevanceScore < 0.4), limit: 3 },
+          ]
 
-          if (highlyRelevant.length > 0) {
-            resultText += `Highly Relevant (${highlyRelevant.length}):\n`
-            for (const link of highlyRelevant.slice(0, 8)) {
-              resultText += `• ${link.text}\n  ${link.url}\n  Score: ${(link.relevanceScore * 100).toFixed(0)}% - ${link.reasoning}\n  Type: ${link.type}\n\n`
-            }
-          }
-
-          if (moderatelyRelevant.length > 0) {
-            resultText += `Moderately Relevant (${moderatelyRelevant.length}):\n`
-            for (const link of moderatelyRelevant.slice(0, 5)) {
-              resultText += `• ${link.text}\n  ${link.url}\n  Score: ${(link.relevanceScore * 100).toFixed(0)}% - ${link.reasoning}\n  Type: ${link.type}\n\n`
-            }
-          }
-
-          if (somewhatRelevant.length > 0 && highlyRelevant.length + moderatelyRelevant.length < 10) {
-            resultText += `Somewhat Relevant (${somewhatRelevant.length}):\n`
-            for (const link of somewhatRelevant.slice(0, 3)) {
-              resultText += `• ${link.text}\n  ${link.url}\n  Score: ${(link.relevanceScore * 100).toFixed(0)}% - ${link.reasoning}\n  Type: ${link.type}\n\n`
+          let totalShown = 0
+          for (const group of relevanceGroups) {
+            if (group.links.length > 0 && (group.name !== 'Somewhat Relevant' || totalShown < 10)) {
+              resultText += `${group.name} (${group.links.length}):\n`
+              const linksToShow = group.links.slice(0, group.limit)
+              for (const link of linksToShow) {
+                resultText += `• ${link.text}\n  ${link.url}\n  Score: ${(link.relevanceScore * 100).toFixed(0)}% - ${link.reasoning}\n  Type: ${link.type}\n\n`
+              }
+              totalShown += linksToShow.length
             }
           }
 
           // Show count of additional links if truncated
-          const totalShown =
-            Math.min(8, highlyRelevant.length) + Math.min(5, moderatelyRelevant.length) + Math.min(3, somewhatRelevant.length)
           if (analysisResult.relevantLinks.length > totalShown) {
             resultText += `... and ${analysisResult.relevantLinks.length - totalShown} more relevant links\n\n`
           }

@@ -189,17 +189,6 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
   }
 }
 
-async function handleMcpRequest(req: Request, env: Env, ctx: ExecutionContext) {
-  const { pathname } = new URL(req.url)
-  if (pathname === '/sse' || pathname === '/sse/message') {
-    return MyMCP.serveSSE('/sse').fetch(req, env, ctx)
-  }
-  if (pathname === '/mcp') {
-    return MyMCP.serve('/mcp').fetch(req, env, ctx)
-  }
-  return new Response('Not found', { status: 404 })
-}
-
 export default new OAuthProvider({
   apiHandler: MyMCP.mount('/sse') as any,
   apiRoute: '/sse',
